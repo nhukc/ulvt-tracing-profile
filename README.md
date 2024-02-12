@@ -15,41 +15,6 @@ the function arguments being included as fields.
 
 The library exposes two layers that output the information in different ways.
 
-### Example Test
-
-```rust
- fn make_spans() {
-        let span = debug_span!("root span");
-        let _scope1 = span.enter();
-
-        // child spans 1 and 2 are siblings
-        let span2 = debug_span!("child span1", field1 = "value1");
-        let scope2 = span2.enter();
-        drop(scope2);
-
-        let span3 = debug_span!("child span2", field2 = "value2");
-        let _scope3 = span3.enter();
-
-        // child spans 3 and 4 are siblings
-        let span = debug_span!("child span3", field3 = "value3");
-        let scope = span.enter();
-        drop(scope);
-
-        let span = debug_span!("child span4", field4 = "value4");
-        let scope = span.enter();
-        drop(scope);
-    }
-
-    #[test]
-    fn all_layers() {
-        tracing_subscriber::registry()
-            .with(PrintTreeLayer::new())
-            .with(CsvLayer::new("/tmp/output.csv"))
-            .init();
-        make_spans();
-    }
-```
-
 ### CsvLayer
 
 The `CsvLayer` writes profiling information to a CSV file, which can be analyzed later by reconstructing the span graph.
@@ -77,6 +42,41 @@ $ cargo test -- --nocapture
 | | child span2; 0.108010 ms; 48.602 %, {"field2":"value2"}
 | | | child span3; 0.004382 ms; 1.972 %, {"field3":"value3"}
 | | | child span4; 0.004180 ms; 1.881 %, {"field4":"value4"}
+```
+
+### Example Test
+
+```rust
+fn make_spans() {
+    let span = debug_span!("root span");
+    let _scope1 = span.enter();
+
+    // child spans 1 and 2 are siblings
+    let span2 = debug_span!("child span1", field1 = "value1");
+    let scope2 = span2.enter();
+    drop(scope2);
+
+    let span3 = debug_span!("child span2", field2 = "value2");
+    let _scope3 = span3.enter();
+
+    // child spans 3 and 4 are siblings
+    let span = debug_span!("child span3", field3 = "value3");
+    let scope = span.enter();
+    drop(scope);
+
+    let span = debug_span!("child span4", field4 = "value4");
+    let scope = span.enter();
+    drop(scope);
+}
+
+#[test]
+fn all_layers() {
+    tracing_subscriber::registry()
+        .with(PrintTreeLayer::new())
+        .with(CsvLayer::new("/tmp/output.csv"))
+        .init();
+    make_spans();
+}
 ```
 
 ## Authors
