@@ -85,16 +85,20 @@ impl GraphNode {
         let pipe_str = pipes.join(" ");
         let relative_time = self.execution_time_ns as f64 * 100.0 / root_time_ns as f64;
 
-        let kv: Vec<_> = self
-            .metadata
-            .iter()
-            .map(|(k, v)| format!("\"{k}\":\"{v}\""))
-            .collect();
-        let metadata = format!("{{{}}}", kv.join(", "));
+        let metadata = if !self.metadata.is_empty() {
+            let kv: Vec<_> = self
+                .metadata
+                .iter()
+                .map(|(k, v)| format!("\"{k}\":\"{v}\""))
+                .collect();
+            format!("; {{{}}}", kv.join(", "))
+        } else {
+            String::new()
+        };
         let execution_time = self.execution_time_ns as f64 / 1000000.0;
 
         println!(
-            "{pipe_str} {}; {:.6} ms; {:.3} %, {}",
+            "{pipe_str} {}; {:.6} ms; {:.3} %{}",
             self.name, execution_time, relative_time, metadata
         )
     }

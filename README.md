@@ -37,11 +37,11 @@ human-readable format. The output structures the span graph as a tree.
 
 ```
 $ cargo test -- --nocapture
-| root span; 0.222233 ms; 100.000 %, {}
-| | child span1; 0.006322 ms; 2.845 %, {"field1":"value1"}
-| | child span2; 0.108010 ms; 48.602 %, {"field2":"value2"}
-| | | child span3; 0.004382 ms; 1.972 %, {"field3":"value3"}
-| | | child span4; 0.004180 ms; 1.881 %, {"field4":"value4"}
+| root span; 0.234570 ms; 100.000 %
+| | child span1; 0.006450 ms; 2.750 %; {"field1":"value1"}
+| | child span2; 0.112323 ms; 47.885 %; {"field2":"value2"}
+| | | child span3; 0.005181 ms; 2.209 %; {"field3":"value3"}
+| | | child span4; 0.004678 ms; 1.994 %; {"field4":"value4"}
 ```
 
 ### Example Test
