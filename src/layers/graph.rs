@@ -1,14 +1,45 @@
+// Copyright 2024 Ulvetanna Inc.
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::{Deref, DerefMut},
     sync::Mutex,
     time::Instant,
 };
 
-use once_cell::sync::Lazy;
+use crate::{
+    data::{FieldVisitor, LogTree, SpanMetadata},
+    err_msg,
+};
 use tracing::span;
 
-/// GraphLayer (internally called layer::graph)  
+#[derive(Debug)]
+pub struct Config {
+    /// Display anything above this percentage in bold red
+    pub attention_above_percent: f64,
+
+    /// Display anything above this percentage in regular white.
+    /// Anything below this percentage will be displayed in dim white/gray.
+    pub relevant_above_percent: f64,
+
+    /// Anything below this percentage is collapsed into `[...]`.
+    /// This is checked after duplicate calls below relevant_above_percent are aggregated.
+    pub hide_below_percent: f64,
+
+    /// Whether to display parent time minus time of all children as
+    /// `[unaccounted]`. Useful to sanity check that you are measuring all the bottlenecks
+    pub display_unaccounted: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            attention_above_percent: 25.0,
+            relevant_above_percent: 2.5,
+            hide_below_percent: 1.0,
+            display_unaccounted: false,
+        }
+    }
+}
+/// GraphLayer (internally called layer::graph)
 /// This Layer prints a call graph to stdout
 ///
 /// example output:
@@ -16,91 +47,27 @@ use tracing::span;
 /// cargo test all_layers -- --nocapture
 ///
 /// running 1 test
-/// | root span; 0.145110 ms; 100.000 %, {}
-/// | | child span1; 0.005400 ms; 3.721 %, {"field1":"value1"}
-/// | | child span2; 0.077458 ms; 53.379 %, {"field2":"value2"}
-/// | | | child span3; 0.003180 ms; 2.191 %, {"field3":"value3"}
-/// | | | child span4; 0.003175 ms; 2.188 %, {"field4":"value4"}
-/// test tests::graph_layer1 ... ok
+/// root span [ 123.79µs | 100.00% ]
+/// ├── child span1 [ 2.88µs | 2.32% ] { field1 = value1 }
+/// └── child span2 [ 51.00µs | 41.20% ] { field2 = value2 }
+///    ├── child span3 [ 1.88µs | 1.51% ] { field3 = value3 }
+///    └── child span4 [ 1.58µs | 1.28% ] { field4 = value4 }
+/// test tests::all_layers ... ok
 /// ```
-#[derive(Default)]
-pub struct Layer;
+pub struct Layer {
+    graph: Mutex<TracingGraph>,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Layer::new(Config::default())
+    }
+}
 
 impl Layer {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-use crate::data::{self, FieldVisitor};
-use crate::err_msg;
-
-static GRAPH: Lazy<Mutex<Graph>> = Lazy::new(|| Mutex::new(Graph::default()));
-
-struct SpanMetadata(data::SpanMetadata);
-
-impl Deref for SpanMetadata {
-    type Target = data::SpanMetadata;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for SpanMetadata {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-#[derive(Default)]
-struct Graph {
-    children: HashMap<u64, Vec<GraphNode>>,
-}
-
-impl Graph {
-    fn print_tree(&self, node: &GraphNode, root_time_ns: u64) {
-        node.print_self(root_time_ns);
-
-        if let Some(list) = self.children.get(&node.id) {
-            for child in list {
-                self.print_tree(child, root_time_ns)
-            }
-        };
-    }
-}
-
-#[derive(Debug)]
-struct GraphNode {
-    name: String,
-    id: u64,
-    execution_time_ns: u64,
-    metadata: BTreeMap<String, String>,
-    call_depth: u64,
-}
-
-impl GraphNode {
-    fn print_self(&self, root_time_ns: u64) {
-        let pipes: Vec<&str> = (0..self.call_depth).map(|_| "|").collect();
-        let pipe_str = pipes.join(" ");
-        let relative_time = self.execution_time_ns as f64 * 100.0 / root_time_ns as f64;
-
-        let metadata = if !self.metadata.is_empty() {
-            let kv: Vec<_> = self
-                .metadata
-                .iter()
-                .map(|(k, v)| format!("\"{k}\":\"{v}\""))
-                .collect();
-            format!("; {{{}}}", kv.join(", "))
-        } else {
-            String::new()
-        };
-        let execution_time = self.execution_time_ns as f64 / 1000000.0;
-
-        println!(
-            "{pipe_str} {}; {:.6} ms; {:.3} %{}",
-            self.name, execution_time, relative_time, metadata
-        )
+    pub fn new(config: Config) -> Self {
+        let graph = TracingGraph::new(config).into();
+        Self { graph }
     }
 }
 
@@ -110,101 +77,67 @@ where
     // no idea what this is but it lets you access the parent span.
     S: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
-    // handles log events like debug!
-    fn on_event(
-        &self,
-        _event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        // don't care about these
-    }
-
     fn on_record(
         &self,
         id: &span::Id,
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        if let Some(span) = ctx.span(id) {
-            if let Some(storage) = span.extensions_mut().get_mut::<SpanMetadata>() {
-                let mut visitor = FieldVisitor(&mut storage.fields);
-                values.record(&mut visitor);
-            } else {
-                err_msg!("failed to get storage on_record");
-            }
-        } else {
-            err_msg!("failed to get span on_record");
-        }
+        let Some(span) = ctx.span(id) else {
+            return err_msg!("Failed to get span on_record");
+        };
+        let mut storage = span.extensions_mut();
+        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
+            return err_msg!("Failed to get storage on_record");
+        };
+        let mut visitor = FieldVisitor(&mut storage.fields);
+        values.record(&mut visitor);
     }
 
     fn on_enter(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            if let Some(storage) = span.extensions_mut().get_mut::<SpanMetadata>() {
-                storage.start_time.replace(Instant::now());
-            } else {
-                err_msg!("failed to get storage on_enter");
-            }
-        } else {
-            err_msg!("failed to get span on_enter");
-        }
+        let Some(span) = ctx.span(id) else {
+            return err_msg!("failed to get span on_enter");
+        };
+        let mut storage = span.extensions_mut();
+        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
+            return err_msg!("failed to get storage on_enter");
+        };
+        storage.start_time.replace(Instant::now());
     }
 
     fn on_exit(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            let parent = span.parent();
-            let (elapsed_ns, call_depth, fields) =
-                match span.extensions_mut().get_mut::<SpanMetadata>() {
-                    Some(storage) => {
-                        let elapsed_ns = storage
-                            .start_time
-                            .map(|x| x.elapsed().as_nanos() as u64)
-                            .unwrap_or_default();
+        let Some(span) = ctx.span(id) else {
+            return err_msg!("failed to get span on_exit");
+        };
+        let mut storage = span.extensions_mut();
+        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
+            return err_msg!("failed to get storage on_exit");
+        };
 
-                        let fields = std::mem::take(&mut storage.fields);
-                        (elapsed_ns, storage.call_depth, fields)
-                    }
-                    None => {
-                        err_msg!("failed to get storage on_exit");
-                        return;
-                    }
-                };
+        let graph_node = GraphNode {
+            id: span.id().into_u64(),
+            execution_duration: storage.start_time.map(|x| x.elapsed()).unwrap_or_default(),
+            name: span.name().into(),
+            metadata: std::mem::take(&mut storage.fields),
+            call_count: 1,
+        };
 
-            let graph_node = GraphNode {
-                id: span.id().into_u64(),
-                execution_time_ns: elapsed_ns,
-                name: span.name().into(),
-                call_depth,
-                metadata: fields,
-            };
-
-            match parent {
-                Some(p) => {
-                    let parent_id = p.id().into_u64();
-                    let mut graph = match GRAPH.lock() {
-                        Ok(r) => r,
-                        Err(e) => {
-                            err_msg!("failed to get mutex: {e}");
-                            return;
-                        }
-                    };
-
-                    let values = graph.children.entry(parent_id).or_insert_with(Vec::new);
-                    values.push(graph_node);
-                }
-                None => {
-                    let graph = match GRAPH.lock() {
-                        Ok(r) => r,
-                        Err(e) => {
-                            err_msg!("failed to get mutex: {e}");
-                            return;
-                        }
-                    };
-
-                    graph.print_tree(&graph_node, elapsed_ns);
-                }
+        let Ok(mut graph) = self.graph.lock() else {
+            return err_msg!("failed to get mutex");
+        };
+        match span.parent() {
+            Some(p) => {
+                graph
+                    .children
+                    .entry(p.id().into_u64())
+                    .or_default()
+                    .push(graph_node);
             }
-        } else {
-            err_msg!("failed to get span on_exit");
+            None => {
+                let tree = graph.render_tree(&graph_node, graph_node.execution_duration);
+                graph.children.clear();
+                println!("{}", tree);
+            }
         }
     }
 
@@ -215,27 +148,173 @@ where
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let Some(span) = ctx.span(id) else {
-            err_msg!("failed to get span on_new_span");
-            return;
+            return err_msg!("failed to get span on_new_span");
         };
-
-        let parent_call_depth = span
-            .parent()
-            .as_ref()
-            .and_then(|p| p.extensions().get::<SpanMetadata>().map(|x| x.call_depth))
-            .unwrap_or_default();
-
-        let mut storage = SpanMetadata(data::SpanMetadata {
+        let mut storage = SpanMetadata {
             start_time: None,
-            call_depth: parent_call_depth + 1,
             fields: BTreeMap::new(),
-        });
-
+            call_depth: 0, // dummy value since this is unused
+        };
         // warning: the library user must use #[instrument(skip_all)] or else too much data will be logged
         let mut visitor = FieldVisitor(&mut storage.fields);
         attrs.record(&mut visitor);
 
         let mut extensions = span.extensions_mut();
         extensions.insert(storage);
+    }
+}
+
+#[derive(Default)]
+struct TracingGraph {
+    children: HashMap<u64, Vec<GraphNode>>,
+    config: Config,
+    no_color: bool,
+}
+
+impl TracingGraph {
+    fn new(config: Config) -> Self {
+        Self {
+            children: HashMap::new(),
+            config,
+            no_color: std::env::var("NO_COLOR").map_or(false, |var| !var.is_empty()),
+        }
+    }
+
+    fn render_tree(&self, node: &GraphNode, root_time: std::time::Duration) -> LogTree {
+        let mut children = vec![];
+        let mut aggregated_node: Option<GraphNode> = None;
+        let mut name_counter: HashMap<&str, usize> = HashMap::new();
+
+        if let Some(unprocessed_children) = self.children.get(&node.id) {
+            for (i, child) in unprocessed_children.iter().enumerate() {
+                let name_count = name_counter.entry(&child.name).or_insert(0);
+                *name_count += 1;
+
+                let next = unprocessed_children.get(i + 1);
+                if next.is_some_and(|next| next.name == child.name) {
+                    if child.execution_percentage(root_time) > self.config.relevant_above_percent {
+                        let mut indexed_child = child.clone();
+                        indexed_child
+                            .metadata
+                            .insert("index".into(), format!("{}", name_count));
+                        children.push(indexed_child);
+                    } else {
+                        aggregated_node = aggregated_node
+                            .map(|node| node.clone().aggregate(child))
+                            .or_else(|| Some(child.clone()));
+                    }
+                } else {
+                    let child = aggregated_node.take().unwrap_or_else(|| child.clone());
+                    children.push(child);
+                }
+            }
+        }
+
+        if self.config.hide_below_percent > 0.0 {
+            children = children.into_iter().fold(vec![], |acc, child| {
+                let mut acc = acc;
+                if child.execution_percentage(root_time) < self.config.hide_below_percent {
+                    if let Some(x) = acc.last_mut() {
+                        if x.name == "[...]" {
+                            *x = x.clone().aggregate(&child);
+                        } else {
+                            acc.push(GraphNode::new("[...]".into()).aggregate(&child))
+                        }
+                    }
+                } else {
+                    acc.push(child);
+                }
+                acc
+            });
+        }
+
+        if self.config.display_unaccounted && !children.is_empty() {
+            let mut unaccounted = GraphNode::new("[unaccounted]".into());
+            unaccounted.execution_duration = node.execution_duration
+                - self
+                    .children
+                    .get(&node.id)
+                    .map_or(std::time::Duration::new(0, 0), |children| {
+                        children
+                            .iter()
+                            .map(|x| x.execution_duration)
+                            .fold(std::time::Duration::new(0, 0), |x, y| x + y)
+                    });
+            children.insert(0, unaccounted);
+        }
+
+        LogTree {
+            label: node.label(root_time, &self.config, self.no_color),
+            children: children
+                .into_iter()
+                .map(|child| self.render_tree(&child, root_time))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+struct GraphNode {
+    name: String,
+    id: u64,
+    execution_duration: std::time::Duration,
+    metadata: BTreeMap<String, String>,
+    call_count: usize,
+}
+
+impl GraphNode {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            ..Default::default()
+        }
+    }
+
+    fn execution_percentage(&self, root_time: std::time::Duration) -> f64 {
+        100.0 * self.execution_duration.as_secs_f64() / root_time.as_secs_f64()
+    }
+
+    fn label(&self, root_time: std::time::Duration, config: &Config, no_color: bool) -> String {
+        let mut info = vec![];
+        if self.call_count > 1 {
+            info.push(format!("({} calls)", self.call_count))
+        } else if !self.metadata.is_empty() {
+            let kv: Vec<_> = self
+                .metadata
+                .iter()
+                .map(|(k, v)| format!("{k} = {v}"))
+                .collect();
+            info.push(format!("{{ {} }}", kv.join(", ")))
+        }
+
+        let name = &self.name;
+        let execution_time = self.execution_duration;
+        let execution_time_percent = self.execution_percentage(root_time);
+        let mut result = format!("{name} [ {execution_time:.2?} | {execution_time_percent:.2}% ]");
+        if !info.is_empty() {
+            result = format!("{result} {}", info.join(" "));
+        }
+
+        if no_color {
+            result
+        } else {
+            format!(
+                "{}{}\x1b[0m",
+                if execution_time_percent > config.attention_above_percent {
+                    "\x1b[1;31m" // bold red
+                } else if execution_time_percent > config.relevant_above_percent {
+                    "\x1b[0m" // white
+                } else {
+                    "\x1b[2m" // gray
+                },
+                result
+            )
+        }
+    }
+
+    fn aggregate(mut self, other: &GraphNode) -> Self {
+        self.execution_duration += other.execution_duration;
+        self.call_count += other.call_count;
+        self
     }
 }

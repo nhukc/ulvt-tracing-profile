@@ -1,6 +1,6 @@
 //! A span based profiler, utilizing the [tracing](https://docs.rs/tracing/latest/tracing/) crate.
 //!
-//! # Overview  
+//! # Overview
 //! This implementation of `tracing_subscriber::Layer<S>` records the time
 //! a span took to execute, along with any user supplied metadata and
 //! information necessary to construct a call graph from the resulting logs.
@@ -19,7 +19,7 @@
 //! fn entry_point() {
 //!     let span = debug_span!("some_span");
 //!     let _scope1 = span.enter();
-//!     
+//!
 //!     let span2 = debug_span!("another_span", field1 = "value1");
 //!     let _scope2 = span2.enter();
 //! }
@@ -36,12 +36,15 @@
 //! Note that if `#[instrument]` is used, `skip_all` is recommended. Omitting this will result in
 //! all the function arguments being included as fields.
 //!
-//! # Features  
+//! # Features
 //! The `panic` feature will turn eprintln! into panic!, causing the program to halt on errors.
 
 mod data;
 mod layers;
-pub use layers::{csv::Layer as CsvLayer, graph::Layer as PrintTreeLayer};
+pub use layers::{
+    csv::Layer as CsvLayer,
+    graph::{Config as PrintTreeConfig, Layer as PrintTreeLayer},
+};
 
 // use this instead of eprintln!
 macro_rules! err_msg {
@@ -85,7 +88,7 @@ mod tests {
     #[test]
     fn all_layers() {
         tracing_subscriber::registry()
-            .with(PrintTreeLayer::new())
+            .with(PrintTreeLayer::default())
             .with(CsvLayer::new("/tmp/output.csv"))
             .init();
         make_spans();
