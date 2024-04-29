@@ -26,7 +26,7 @@
 //!
 //! fn main() {
 //!     tracing_subscriber::registry()
-//!         .with(PrintTreeLayer::new())
+//!         .with(PrintTreeLayer::default())
 //!         .with(CsvLayer::new("/tmp/output.csv"))
 //!         .init();
 //!     entry_point();

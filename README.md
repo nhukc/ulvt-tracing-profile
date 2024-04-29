@@ -37,11 +37,11 @@ human-readable format. The output structures the span graph as a tree.
 
 ```
 $ cargo test -- --nocapture
-| root span; 0.234570 ms; 100.000 %
-| | child span1; 0.006450 ms; 2.750 %; {"field1":"value1"}
-| | child span2; 0.112323 ms; 47.885 %; {"field2":"value2"}
-| | | child span3; 0.005181 ms; 2.209 %; {"field3":"value3"}
-| | | child span4; 0.004678 ms; 1.994 %; {"field4":"value4"}
+root span [ 112.67µs | 100.00% ]
+├── child span1 [ 2.63µs | 2.33% ] { field1 = value1 }
+└── child span2 [ 64.29µs | 57.06% ] { field2 = value2 }
+   ├── child span3 [ 1.88µs | 1.66% ] { field3 = value3 }
+   └── child span4 [ 1.67µs | 1.48% ] { field4 = value4 }
 ```
 
 ### Example Test
@@ -72,7 +72,27 @@ fn make_spans() {
 #[test]
 fn all_layers() {
     tracing_subscriber::registry()
-        .with(PrintTreeLayer::new())
+        .with(PrintTreeLayer::default())
+        .with(CsvLayer::new("/tmp/output.csv"))
+        .init();
+    make_spans();
+}
+```
+
+### Configuration
+
+Using `PrintTreeConfig` you can configure color and aggregation/hiding thresholds.
+
+```rs
+#[test]
+fn all_layers() {
+    tracing_subscriber::registry()
+        .with(PrintTreeLayer::new(PrintTreeConfig {
+            attention_above_percent: 25.0,
+            relevant_above_percent: 2.5,
+            hide_below_percent: 1.0,
+            display_unaccounted: false
+        }))
         .with(CsvLayer::new("/tmp/output.csv"))
         .init();
     make_spans();
