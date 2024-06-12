@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    data::{FieldVisitor, LogTree, SpanMetadata},
+    data::{insert_to_span_storage, with_span_storage_mut, FieldVisitor, LogTree, SpanMetadata},
     err_msg,
 };
 use tracing::span;
@@ -83,26 +83,16 @@ where
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let Some(span) = ctx.span(id) else {
-            return err_msg!("Failed to get span on_record");
-        };
-        let mut storage = span.extensions_mut();
-        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
-            return err_msg!("Failed to get storage on_record");
-        };
-        let mut visitor = FieldVisitor(&mut storage.fields);
-        values.record(&mut visitor);
+        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+            let mut visitor = FieldVisitor(&mut storage.fields);
+            values.record(&mut visitor);
+        });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let Some(span) = ctx.span(id) else {
-            return err_msg!("failed to get span on_enter");
-        };
-        let mut storage = span.extensions_mut();
-        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
-            return err_msg!("failed to get storage on_enter");
-        };
-        storage.start_time.replace(Instant::now());
+        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+            storage.start_time.replace(Instant::now());
+        });
     }
 
     fn on_exit(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
@@ -147,9 +137,6 @@ where
         id: &span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let Some(span) = ctx.span(id) else {
-            return err_msg!("failed to get span on_new_span");
-        };
         let mut storage = SpanMetadata {
             start_time: None,
             fields: BTreeMap::new(),
@@ -159,8 +146,7 @@ where
         let mut visitor = FieldVisitor(&mut storage.fields);
         attrs.record(&mut visitor);
 
-        let mut extensions = span.extensions_mut();
-        extensions.insert(storage);
+        insert_to_span_storage(id, ctx, storage);
     }
 }
 

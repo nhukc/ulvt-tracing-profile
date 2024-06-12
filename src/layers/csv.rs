@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::{collections::BTreeMap, time::Instant};
 use tracing::span;
 
-use crate::data::{self, FieldVisitor};
+use crate::data::{self, with_span_storage_mut, FieldVisitor};
 use crate::err_msg;
 
 /// CsvLayer (internally called layer::csv)  
@@ -115,28 +115,16 @@ where
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        if let Some(span) = ctx.span(id) {
-            if let Some(storage) = span.extensions_mut().get_mut::<SpanMetadata>() {
-                let mut visitor = FieldVisitor(&mut storage.fields);
-                values.record(&mut visitor);
-            } else {
-                err_msg!("failed to get storage on_record");
-            }
-        } else {
-            err_msg!("failed to get span on_record");
-        }
+        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+            let mut visitor = FieldVisitor(&mut storage.fields);
+            values.record(&mut visitor);
+        });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if let Some(span) = ctx.span(id) {
-            if let Some(storage) = span.extensions_mut().get_mut::<SpanMetadata>() {
-                storage.start_time.replace(Instant::now());
-            } else {
-                err_msg!("failed to get storage on_enter");
-            }
-        } else {
-            err_msg!("failed to get span on_enter");
-        }
+        with_span_storage_mut::<SpanMetadata, _>(id, ctx, |storage| {
+            storage.start_time.replace(Instant::now());
+        });
     }
 
     fn on_exit(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {

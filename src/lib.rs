@@ -5,9 +5,10 @@
 //! a span took to execute, along with any user supplied metadata and
 //! information necessary to construct a call graph from the resulting logs.
 //!
-//! Two Layer implementations are provided:
+//! Three `Layer` implementations are provided:
 //!     `CsvLayer`: logs data in CSV format
 //!     `PrintTreeLayer`: prints a call graph
+//!     `PrintPerfCountersLayer`: prints aggregated performance counters for each span.
 //!
 //! ```
 //! use tracing::instrument;
@@ -25,10 +26,22 @@
 //! }
 //!
 //! fn main() {
-//!     tracing_subscriber::registry()
+//!     let layer = tracing_subscriber::registry()
 //!         .with(PrintTreeLayer::default())
-//!         .with(CsvLayer::new("/tmp/output.csv"))
-//!         .init();
+//!         .with(CsvLayer::new("/tmp/output.csv"));
+//!
+//!     
+//!     #[cfg(feature = "perf_counters")]
+//!     {
+//!        use perf_event::events::Hardware;
+//!        layer.with(PrintPerfCountersLayer::new(
+//!            vec![("instructions".to_string(), Hardware::INSTRUCTIONS.into())]
+//!        ).unwrap()).init();
+//!     }
+//!     #[cfg(not(feature = "perf_counters"))]
+//!     {
+//!        layer.init();
+//!     }
 //!     entry_point();
 //! }
 //! ```
@@ -41,6 +54,9 @@
 
 mod data;
 mod layers;
+
+#[cfg(feature = "perf_counters")]
+pub use layers::print_perf_counters::Layer as PrintPerfCountersLayer;
 pub use layers::{
     csv::Layer as CsvLayer,
     graph::{Config as PrintTreeConfig, Layer as PrintTreeLayer},
@@ -59,6 +75,7 @@ pub(crate) use err_msg;
 #[cfg(test)]
 mod tests {
     use tracing::debug_span;
+    use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::prelude::*;
 
     use super::*;
@@ -85,12 +102,35 @@ mod tests {
         drop(scope);
     }
 
+    #[cfg(not(feature = "perf_counters"))]
+    fn with_with_perf_counters(subscriber: impl SubscriberExt) -> impl SubscriberExt {
+        subscriber
+    }
+
+    #[cfg(feature = "perf_counters")]
+    fn with_with_perf_counters<S>(subscriber: S) -> impl SubscriberExt
+    where
+        S: SubscriberExt + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+    {
+        use perf_event::events::Hardware;
+
+        subscriber.with(
+            PrintPerfCountersLayer::new(vec![
+                ("instructions".to_string(), Hardware::INSTRUCTIONS.into()),
+                ("cycles".to_string(), Hardware::CPU_CYCLES.into()),
+            ])
+            .unwrap(),
+        )
+    }
+
     #[test]
     fn all_layers() {
-        tracing_subscriber::registry()
-            .with(PrintTreeLayer::default())
-            .with(CsvLayer::new("/tmp/output.csv"))
-            .init();
+        with_with_perf_counters(
+            tracing_subscriber::registry()
+                .with(PrintTreeLayer::default())
+                .with(CsvLayer::new("/tmp/output.csv")),
+        )
+        .init();
         make_spans();
     }
 }
