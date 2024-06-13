@@ -54,22 +54,23 @@ use crate::err_msg;
 
 pub struct Layer {
     tx: mpsc::Sender<String>,
+    init_time: Instant,
 }
 
 // if Csvlayer and GraphLayer are used at the same time, there will be a problem if
 // they both register an extension of the same type. The newtype pattern is used here
 // to avoid that problem.
-struct SpanMetadata(data::SpanMetadata);
+struct CsvMetadata(data::CsvMetadata);
 
-impl Deref for SpanMetadata {
-    type Target = data::SpanMetadata;
+impl Deref for CsvMetadata {
+    type Target = data::CsvMetadata;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for SpanMetadata {
+impl DerefMut for CsvMetadata {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -81,16 +82,17 @@ impl Layer {
         let mut f = std::fs::File::create(output_file).expect("CsvLogger failed to open file");
         let (tx, rx) = mpsc::channel::<String>();
         std::thread::spawn(move || {
-            let _ = f.write(
-                "id,parent_id,elapsed_ns,span_name,file_name,call_depth,metadata\n".as_bytes(),
-            );
+            let _ = f.write(LogRow::header().as_bytes());
             while let Ok(msg) = rx.recv() {
                 let _ = f.write(msg.as_bytes());
             }
 
             let _ = f.sync_all();
         });
-        Self { tx }
+        Self {
+            tx,
+            init_time: Instant::now(),
+        }
     }
 }
 
@@ -115,26 +117,28 @@ where
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+        with_span_storage_mut(id, ctx, |storage: &mut CsvMetadata| {
             let mut visitor = FieldVisitor(&mut storage.fields);
             values.record(&mut visitor);
         });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        with_span_storage_mut::<SpanMetadata, _>(id, ctx, |storage| {
-            storage.start_time.replace(Instant::now());
+        with_span_storage_mut::<CsvMetadata, _>(id, ctx, |storage| {
+            storage
+                .start_time
+                .replace(self.init_time.elapsed().as_nanos() as u64);
         });
     }
 
     fn on_exit(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
             let parent = span.parent();
-            if let Some(storage) = span.extensions_mut().get_mut::<SpanMetadata>() {
-                let elapsed_ns = storage
-                    .start_time
-                    .map(|x| x.elapsed().as_nanos() as u64)
-                    .unwrap_or_default();
+            if let Some(storage) = span.extensions_mut().get_mut::<CsvMetadata>() {
+                let end_time = self.init_time.elapsed().as_nanos() as u64;
+                let start_time = storage.start_time.unwrap_or(end_time);
+                let thread_id = format!("{:?}", std::thread::current().id());
+                let thread_name = format!("{:?}", std::thread::current().name());
 
                 let fields = std::mem::take(&mut storage.fields);
 
@@ -150,7 +154,10 @@ where
                         .file()
                         .map(|x| x.to_string())
                         .unwrap_or_default(),
-                    elapsed_ns,
+                    start_ns: start_time,
+                    end_ns: end_time,
+                    thread_id,
+                    thread_name,
                     call_depth: storage.call_depth,
                     fields,
                 };
@@ -179,10 +186,10 @@ where
         let parent_call_depth = span
             .parent()
             .as_ref()
-            .and_then(|p| p.extensions().get::<SpanMetadata>().map(|x| x.call_depth))
+            .and_then(|p| p.extensions().get::<CsvMetadata>().map(|x| x.call_depth))
             .unwrap_or_default();
 
-        let mut storage = SpanMetadata(data::SpanMetadata {
+        let mut storage = CsvMetadata(data::CsvMetadata {
             start_time: None,
             call_depth: parent_call_depth + 1,
             fields: BTreeMap::new(),
@@ -204,8 +211,17 @@ struct LogRow {
     span_name: String,
     file_name: String,
     call_depth: u64,
-    elapsed_ns: u64,
+    start_ns: u64,
+    end_ns: u64,
+    thread_id: String,
+    thread_name: String,
     fields: BTreeMap<String, String>,
+}
+
+impl LogRow {
+    fn header<'a>() -> &'a str {
+        "id,parent_id,elapsed_ns,start_ns,end_ns,thread_id,thread_name,span_name,file_name,call_depth,metadata\n"
+    }
 }
 
 impl std::fmt::Display for LogRow {
@@ -221,10 +237,14 @@ impl std::fmt::Display for LogRow {
         let fields = format!("{{{}}}", kv.join("; "));
         write!(
             f,
-            "{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             self.id,
             self.parent_id,
-            self.elapsed_ns,
+            self.end_ns - self.start_ns,
+            self.start_ns,
+            self.end_ns,
+            self.thread_id,
+            self.thread_name,
             self.span_name,
             self.file_name,
             self.call_depth,

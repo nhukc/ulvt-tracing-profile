@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    data::{insert_to_span_storage, with_span_storage_mut, FieldVisitor, LogTree, SpanMetadata},
+    data::{insert_to_span_storage, with_span_storage_mut, FieldVisitor, GraphMetadata, LogTree},
     err_msg,
 };
 use tracing::span;
@@ -83,14 +83,14 @@ where
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+        with_span_storage_mut(id, ctx, |storage: &mut GraphMetadata| {
             let mut visitor = FieldVisitor(&mut storage.fields);
             values.record(&mut visitor);
         });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        with_span_storage_mut(id, ctx, |storage: &mut SpanMetadata| {
+        with_span_storage_mut(id, ctx, |storage: &mut GraphMetadata| {
             storage.start_time.replace(Instant::now());
         });
     }
@@ -100,7 +100,7 @@ where
             return err_msg!("failed to get span on_exit");
         };
         let mut storage = span.extensions_mut();
-        let Some(storage) = storage.get_mut::<SpanMetadata>() else {
+        let Some(storage) = storage.get_mut::<GraphMetadata>() else {
             return err_msg!("failed to get storage on_exit");
         };
 
@@ -137,10 +137,9 @@ where
         id: &span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let mut storage = SpanMetadata {
+        let mut storage = GraphMetadata {
             start_time: None,
             fields: BTreeMap::new(),
-            call_depth: 0, // dummy value since this is unused
         };
         // warning: the library user must use #[instrument(skip_all)] or else too much data will be logged
         let mut visitor = FieldVisitor(&mut storage.fields);
