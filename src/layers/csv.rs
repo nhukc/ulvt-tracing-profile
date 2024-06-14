@@ -55,6 +55,7 @@ use crate::err_msg;
 pub struct Layer {
     tx: mpsc::Sender<String>,
     init_time: Instant,
+    _perfetto_guard: Option<perfetto_sys::PerfettoGuard>,
 }
 
 // if Csvlayer and GraphLayer are used at the same time, there will be a problem if
@@ -92,6 +93,7 @@ impl Layer {
         Self {
             tx,
             init_time: Instant::now(),
+            _perfetto_guard: Some(perfetto_sys::PerfettoGuard::new()),
         }
     }
 }
@@ -161,7 +163,7 @@ where
                     call_depth: storage.call_depth,
                     fields,
                 };
-
+                storage.trace_guard.take();
                 let msg = format!("{log_row}\n");
                 let _ = self.tx.send(msg);
             } else {
@@ -193,6 +195,7 @@ where
             start_time: None,
             call_depth: parent_call_depth + 1,
             fields: BTreeMap::new(),
+            trace_guard: Some(perfetto_sys::TraceEvent::new(span.name())),
         });
 
         // warning: the library user must use #[instrument(skip_all)] or else too much data will be logged
