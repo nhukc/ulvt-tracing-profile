@@ -1,5 +1,5 @@
 [package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 name = "tracing-profile"
 description = "A span based profiler, utilizing the tracing crate"
@@ -12,8 +12,9 @@ repository = "https://gitlab.com/IrreducibleOSS/tracing-profile"
 perf-event = { version = "0.4.8", optional = true }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
-perfetto-sys = { git = "ssh://git@gitlab.com/ulvetanna/perfetto-sys.git"}
+perfetto-sys = { path = "../perfetto-sys", optional = true } #{ git = "ssh://git@gitlab.com/ulvetanna/perfetto-sys.git", optional = true}
 
 [features]
 panic = []
 perf_counters = ["perf-event"]
+perfetto = ["dep:perfetto-sys"]

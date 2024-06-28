@@ -5,6 +5,11 @@ pub struct CsvMetadata {
     pub start_time: Option<u64>,
     pub call_depth: u64,
     pub fields: BTreeMap<String, String>,
+}
+
+#[derive(Debug)]
+#[cfg(feature = "perfetto")]
+pub struct PerfettoMetadata {
     pub trace_guard: Option<perfetto_sys::TraceEvent>,
 }
 

@@ -1,11 +1,10 @@
 use std::io::Write;
-use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::sync::mpsc;
 use std::{collections::BTreeMap, time::Instant};
 use tracing::span;
 
-use crate::data::{self, with_span_storage_mut, FieldVisitor};
+use crate::data::{with_span_storage_mut, CsvMetadata, FieldVisitor};
 use crate::err_msg;
 
 /// CsvLayer (internally called layer::csv)  
@@ -55,26 +54,6 @@ use crate::err_msg;
 pub struct Layer {
     tx: mpsc::Sender<String>,
     init_time: Instant,
-    _perfetto_guard: Option<perfetto_sys::PerfettoGuard>,
-}
-
-// if Csvlayer and GraphLayer are used at the same time, there will be a problem if
-// they both register an extension of the same type. The newtype pattern is used here
-// to avoid that problem.
-struct CsvMetadata(data::CsvMetadata);
-
-impl Deref for CsvMetadata {
-    type Target = data::CsvMetadata;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for CsvMetadata {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
 }
 
 impl Layer {
@@ -93,7 +72,6 @@ impl Layer {
         Self {
             tx,
             init_time: Instant::now(),
-            _perfetto_guard: Some(perfetto_sys::PerfettoGuard::new()),
         }
     }
 }
@@ -163,7 +141,6 @@ where
                     call_depth: storage.call_depth,
                     fields,
                 };
-                storage.trace_guard.take();
                 let msg = format!("{log_row}\n");
                 let _ = self.tx.send(msg);
             } else {
@@ -191,12 +168,11 @@ where
             .and_then(|p| p.extensions().get::<CsvMetadata>().map(|x| x.call_depth))
             .unwrap_or_default();
 
-        let mut storage = CsvMetadata(data::CsvMetadata {
+        let mut storage = CsvMetadata {
             start_time: None,
             call_depth: parent_call_depth + 1,
             fields: BTreeMap::new(),
-            trace_guard: Some(perfetto_sys::TraceEvent::new(span.name())),
-        });
+        };
 
         // warning: the library user must use #[instrument(skip_all)] or else too much data will be logged
         let mut visitor = FieldVisitor(&mut storage.fields);
