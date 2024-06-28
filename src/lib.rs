@@ -62,6 +62,9 @@ pub use layers::{
     graph::{Config as PrintTreeConfig, Layer as PrintTreeLayer},
 };
 
+#[cfg(feature = "perfetto")]
+pub use layers::perfetto::Layer as PerfettoLayer;
+
 // use this instead of eprintln!
 macro_rules! err_msg {
     ($($arg:tt)*) => {{
@@ -131,6 +134,15 @@ mod tests {
                 .with(CsvLayer::new("/tmp/output.csv")),
         )
         .init();
+        make_spans();
+    }
+
+    #[cfg(feature = "perfetto")]
+    #[test]
+    fn perfetto_test() {
+        tracing_subscriber::registry()
+            .with(PerfettoLayer::new())
+            .init();
         make_spans();
     }
 }
