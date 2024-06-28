@@ -1,14 +1,16 @@
-use std::ops::{Deref, DerefMut};
-use std::path::Path;
-use std::sync::mpsc;
-use std::{collections::BTreeMap, time::Instant};
 use tracing::span;
 
-use crate::data::{self, with_span_storage_mut, PerfettoMetadata};
+use crate::data::{with_span_storage_mut, PerfettoMetadata};
 use crate::err_msg;
 
 pub struct Layer {
     _perfetto_guard: Option<perfetto_sys::PerfettoGuard>,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Layer {
@@ -81,7 +83,7 @@ where
             return;
         };
 
-        let mut storage = PerfettoMetadata { trace_guard: None };
+        let storage = PerfettoMetadata { trace_guard: None };
         let mut extensions = span.extensions_mut();
         extensions.insert(storage);
     }
