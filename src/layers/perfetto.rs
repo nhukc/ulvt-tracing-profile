@@ -38,9 +38,9 @@ where
 
     fn on_record(
         &self,
-        id: &span::Id,
-        values: &span::Record<'_>,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
+        _id: &span::Id,
+        _values: &span::Record<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
     }
 
@@ -61,7 +61,6 @@ where
 
     fn on_exit(&self, id: &span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let parent = span.parent();
             if let Some(storage) = span.extensions_mut().get_mut::<PerfettoMetadata>() {
                 storage.trace_guard.take();
             } else {
@@ -74,7 +73,7 @@ where
 
     fn on_new_span(
         &self,
-        attrs: &span::Attributes<'_>,
+        _attrs: &span::Attributes<'_>,
         id: &span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
