@@ -65,6 +65,9 @@ pub use layers::{
 #[cfg(feature = "perfetto")]
 pub use layers::perfetto::Layer as PerfettoLayer;
 
+#[cfg(feature = "perfetto")]
+pub use perfetto_sys::record_fpga_throughput;
+
 // use this instead of eprintln!
 macro_rules! err_msg {
     ($($arg:tt)*) => {{
@@ -144,5 +147,7 @@ mod tests {
             .with(PerfettoLayer::new())
             .init();
         make_spans();
+
+        record_fpga_throughput("fpga1", 1.8);
     }
 }
