@@ -5,10 +5,11 @@
 //! a span took to execute, along with any user supplied metadata and
 //! information necessary to construct a call graph from the resulting logs.
 //!
-//! Three `Layer` implementations are provided:
+//! Four `Layer` implementations are provided:
 //!     `CsvLayer`: logs data in CSV format
 //!     `PrintTreeLayer`: prints a call graph
 //!     `PrintPerfCountersLayer`: prints aggregated performance counters for each span.
+//!     `PerfettoLayer`: Connects to a system-wide perfetto logging service which will create a fused trace. Be warned - the program will block until a connection is established with perfetto's traced service.
 //!
 //! ```
 //! use tracing::instrument;
@@ -35,6 +36,10 @@
 //!         #[cfg(feature = "perfetto")]
 //!         {
 //!             layer.with(PerfettoLayer::new()).init();
+//!             
+//!             // all spans will be included in the fused trace. additionally the user may use this zkprof specific counter as follows:
+//!             // note that units are in Gb/s
+//!             record_fpga_throughput("card1", 100.5);
 //!             break;
 //!         }
 //!         
