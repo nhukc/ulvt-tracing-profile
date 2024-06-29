@@ -35,11 +35,13 @@
 //!     loop {
 //!         #[cfg(feature = "perfetto")]
 //!         {
+//!             use tracing::{event, Level};
 //!             layer.with(PerfettoLayer::new()).init();
 //!             
-//!             // all spans will be included in the fused trace. additionally the user may use this zkprof specific counter as follows:
-//!             // note that units are in Gb/s
-//!             record_fpga_throughput("card1", 100.5);
+//!             // all spans will be included in the fused trace. additionally the user may use a zkprof specific perfetto counter via the tracing crate's event! macro as follows:
+//!             // note that bps is bits per second
+//!             // name: "fpga_throughput" ensures the other events don't accidentally get interpreted as fpga throughput
+//!             event!(name: "fpga_throughput", Level::DEBUG, card = "fpga1", bps = 100e9 as u64);
 //!             break;
 //!         }
 //!         
@@ -78,9 +80,6 @@ pub use layers::{
 
 #[cfg(feature = "perfetto")]
 pub use layers::perfetto::Layer as PerfettoLayer;
-
-#[cfg(feature = "perfetto")]
-pub use perfetto_sys::record_fpga_throughput;
 
 // use this instead of eprintln!
 macro_rules! err_msg {

@@ -1,7 +1,36 @@
-use tracing::span;
+use std::fmt;
+use tracing::{
+    field::{Field, Visit},
+    span,
+};
 
 use crate::data::{with_span_storage_mut, PerfettoMetadata};
 use crate::err_msg;
+
+// gets the needed data out of an Event by implementing the Visit trait
+#[derive(Default)]
+struct FpgaThroughputEvent {
+    card: Option<String>,
+    bps: u64,
+}
+
+impl Visit for FpgaThroughputEvent {
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if field.name() == "bps" {
+            self.bps = value;
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "card" {
+            self.card.replace(value.to_string());
+        }
+    }
+
+    fn record_i64(&mut self, _: &Field, _: i64) {}
+    fn record_bool(&mut self, _: &Field, _: bool) {}
+    fn record_debug(&mut self, _: &Field, _: &dyn fmt::Debug) {}
+}
 
 pub struct Layer {
     _perfetto_guard: Option<perfetto_sys::PerfettoGuard>,
@@ -27,13 +56,24 @@ where
     // no idea what this is but it lets you access the parent span.
     S: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
-    // handles log events like debug!
+    // turns log events into counters
     fn on_event(
         &self,
-        _event: &tracing::Event<'_>,
+        event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        // don't care about these
+        if event.metadata().name() != "fpga_throughput" {
+            return;
+        }
+
+        let mut data = FpgaThroughputEvent::default();
+        event.record(&mut data);
+
+        let Some(card) = data.card else {
+            err_msg!("invalid fpga throughput event: {:?}", event);
+            return;
+        };
+        perfetto_sys::record_fpga_throughput(&card, data.bps);
     }
 
     fn on_record(
