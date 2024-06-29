@@ -30,18 +30,27 @@
 //!         .with(PrintTreeLayer::default())
 //!         .with(CsvLayer::new("/tmp/output.csv"));
 //!
+//!     // note that both these features could be used at once. The code is written this way to make the rustdoc compile.
+//!     loop {
+//!         #[cfg(feature = "perfetto")]
+//!         {
+//!             layer.with(PerfettoLayer::new()).init();
+//!             break;
+//!         }
+//!         
+//!         #[cfg(feature = "perf_counters")]
+//!         {
+//!             use perf_event::events::Hardware;
+//!             layer.with(PrintPerfCountersLayer::new(
+//!                 vec![("instructions".to_string(), Hardware::INSTRUCTIONS.into())]
+//!             ).unwrap()).init();
+//!             break;
+//!         }
+//!         
+//!         layer.init();
+//!         break;
+//!     }
 //!     
-//!     #[cfg(feature = "perf_counters")]
-//!     {
-//!        use perf_event::events::Hardware;
-//!        layer.with(PrintPerfCountersLayer::new(
-//!            vec![("instructions".to_string(), Hardware::INSTRUCTIONS.into())]
-//!        ).unwrap()).init();
-//!     }
-//!     #[cfg(not(feature = "perf_counters"))]
-//!     {
-//!        layer.init();
-//!     }
 //!     entry_point();
 //! }
 //! ```
