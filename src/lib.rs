@@ -80,6 +80,8 @@ pub use layers::{
 
 #[cfg(feature = "perfetto")]
 pub use layers::perfetto::Layer as PerfettoLayer;
+#[cfg(feature = "perfetto")]
+pub use perfetto_sys::Backend as PerfettoBackend;
 
 // use this instead of eprintln!
 macro_rules! err_msg {

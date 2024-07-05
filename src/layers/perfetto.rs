@@ -38,14 +38,14 @@ pub struct Layer {
 
 impl Default for Layer {
     fn default() -> Self {
-        Self::new()
+        Self::new(perfetto_sys::Backend::InProcess)
     }
 }
 
 impl Layer {
-    pub fn new() -> Self {
+    pub fn new(backend: perfetto_sys::Backend) -> Self {
         Self {
-            _perfetto_guard: Some(perfetto_sys::PerfettoGuard::new()),
+            _perfetto_guard: Some(perfetto_sys::PerfettoGuard::new(backend)),
         }
     }
 }
